@@ -1,0 +1,34 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Location {
+  id          Int           @id @default(autoincrement())
+  name        String
+  latitude    Float
+  longitude   Float
+  state       String?
+  country     String?
+
+  weatherData WeatherData[]
+}
+
+model WeatherData {
+  id          Int       @id @default(autoincrement())
+
+  temperature Float
+  humidity    Int
+  rainfall    Float
+  windSpeed   Float
+  pressure    Float?
+
+  timestamp   DateTime
+
+  locationId  Int
+  location    Location @relation(fields: [locationId], references: [id])
+}
