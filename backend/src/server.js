@@ -1,21 +1,42 @@
-const express = require("express");
+/**
+ * Server Entry Point.
+ * Loads environment config, then starts the HTTP server.
+ */
 
-const healthRoute = require("./routes/health");
-const weatherRoute = require("./routes/weather");
+const env    = require("./config/env");   // validates env vars first
+const app    = require("./app");
+const logger = require("./config/logger");
+const prisma = require("./config/prisma");
 
-const app = express();
+const { PORT } = env;
 
-const PORT = 3000;
+const start = async () => {
+    try {
+        // Verify database connectivity before accepting traffic
+        await prisma.$connect();
+        logger.info("Database connection established.");
 
-app.use(express.json());
+        app.listen(PORT, () => {
+            logger.info(`Server running on http://localhost:${PORT}`);
+        });
+    } catch (err) {
+        logger.error("Failed to start server.", { message: err.message });
+        await prisma.$disconnect();
+        process.exit(1);
+    }
+};
 
-app.get("/", (req, res) => {
-    res.send("Flood Detection AI Backend Running 🚀");
+// Graceful shutdown
+process.on("SIGTERM", async () => {
+    logger.info("SIGTERM received — shutting down gracefully.");
+    await prisma.$disconnect();
+    process.exit(0);
 });
 
-app.use("/health", healthRoute);
-app.use("/api/weather", weatherRoute);
-
-app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
+process.on("SIGINT", async () => {
+    logger.info("SIGINT received — shutting down gracefully.");
+    await prisma.$disconnect();
+    process.exit(0);
 });
+
+start();

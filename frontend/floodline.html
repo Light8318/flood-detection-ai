@@ -1,0 +1,950 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FloodLine — Flood Reporting &amp; Rescue Coordination</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800;900&family=Work+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --deep-water:#0B3B4E;
+  --deep-water-2:#0E4A61;
+  --river:#146C8C;
+  --river-light:#2E93B5;
+  --mist:#EAF3F3;
+  --foam:#F6FBFB;
+  --ink:#0A1F26;
+  --ink-soft:#4B6570;
+  --amber:#E8A33D;
+  --red:#C1432D;
+  --green:#3E8F6F;
+  --line:#D6E4E6;
+  --shadow: 0 20px 50px -20px rgba(11,59,78,0.35);
+}
+*{box-sizing:border-box; margin:0; padding:0;}
+body{
+  font-family:'Work Sans', sans-serif;
+  color:var(--ink);
+  background:var(--foam);
+  min-height:100vh;
+  overflow-x:hidden;
+}
+h1,h2,h3, .display{
+  font-family:'Archivo', sans-serif;
+  letter-spacing:-0.01em;
+}
+.mono{ font-family:'JetBrains Mono', monospace; }
+button{ font-family:inherit; cursor:pointer; border:none; }
+input, textarea, select{ font-family:inherit; }
+::selection{ background:var(--amber); color:var(--ink); }
+@media (prefers-reduced-motion: reduce){
+  *{ animation-duration:0.01ms !important; animation-iteration-count:1 !important; transition-duration:0.01ms !important; }
+}
+
+/* ---------- screen management ---------- */
+.screen{ display:none; min-height:100vh; }
+.screen.active{ display:flex; }
+
+/* ================= AUTH SCREEN ================= */
+#auth-screen.active{ }
+.auth-wrap{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  width:100%;
+  min-height:100vh;
+}
+.auth-hero{
+  background: linear-gradient(180deg, var(--deep-water) 0%, var(--deep-water-2) 65%, var(--river) 130%);
+  position:relative;
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
+  justify-content:space-between;
+  padding:48px 56px;
+  color:var(--foam);
+}
+.auth-hero .brand{
+  display:flex; align-items:center; gap:10px;
+  font-family:'Archivo', sans-serif; font-weight:800; font-size:22px; letter-spacing:0.02em;
+  z-index:2;
+}
+.auth-hero .brand .dot{ width:10px; height:10px; border-radius:50%; background:var(--amber); box-shadow:0 0 0 4px rgba(232,163,61,0.25); }
+.auth-hero .copy{ z-index:2; max-width:420px; }
+.auth-hero .eyebrow{
+  font-family:'JetBrains Mono', monospace; font-size:12px; letter-spacing:0.14em; text-transform:uppercase;
+  color:var(--amber); margin-bottom:14px; display:flex; align-items:center; gap:8px;
+}
+.auth-hero .eyebrow::before{ content:""; width:16px; height:1px; background:var(--amber); display:inline-block; }
+.auth-hero h1{ font-size:44px; line-height:1.05; font-weight:800; margin-bottom:16px; }
+.auth-hero p{ font-size:15px; line-height:1.6; color:rgba(246,251,251,0.8); }
+.auth-hero .stats{ display:flex; gap:32px; z-index:2; }
+.auth-hero .stat b{ display:block; font-family:'JetBrains Mono', monospace; font-size:26px; color:var(--foam); }
+.auth-hero .stat span{ font-size:12px; color:rgba(246,251,251,0.6); }
+
+/* signature element: the rising gauge, watermarked large behind copy */
+.gauge-field{
+  position:absolute; inset:0; z-index:1; pointer-events:none;
+}
+.gauge-bar{
+  position:absolute; bottom:0; width:38px; border-radius:6px 6px 0 0;
+  background:linear-gradient(180deg, rgba(46,147,181,0.55), rgba(46,147,181,0.08));
+  animation:rise 6s ease-in-out infinite;
+}
+@keyframes rise{
+  0%,100%{ transform:scaleY(0.55); }
+  50%{ transform:scaleY(1); }
+}
+.gauge-bar{ transform-origin:bottom; }
+
+.auth-panel{
+  display:flex; align-items:center; justify-content:center;
+  padding:40px;
+  background:var(--foam);
+}
+.auth-card{ width:100%; max-width:400px; }
+.auth-card .kicker{
+  font-family:'JetBrains Mono', monospace; font-size:12px; letter-spacing:0.12em; text-transform:uppercase;
+  color:var(--river); margin-bottom:8px;
+}
+.auth-card h2{ font-size:28px; margin-bottom:6px; color:var(--ink); }
+.auth-card .sub{ font-size:14px; color:var(--ink-soft); margin-bottom:28px; }
+
+.role-toggle{
+  display:flex; background:var(--mist); border-radius:10px; padding:4px; margin-bottom:22px;
+}
+.role-toggle button{
+  flex:1; padding:10px; border-radius:7px; background:transparent; font-weight:600; font-size:13px;
+  color:var(--ink-soft); transition:all .18s ease;
+}
+.role-toggle button.active{ background:var(--deep-water); color:var(--foam); }
+
+.field{ margin-bottom:16px; }
+.field label{ display:block; font-size:12px; font-weight:600; color:var(--ink-soft); margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em; }
+.field input, .field select{
+  width:100%; padding:12px 14px; border:1.5px solid var(--line); border-radius:9px; font-size:14px;
+  background:#fff; color:var(--ink); transition:border-color .15s ease;
+}
+.field input:focus, .field select:focus{ outline:none; border-color:var(--river-light); box-shadow:0 0 0 3px rgba(46,147,181,0.15); }
+
+.btn-primary{
+  width:100%; padding:13px; border-radius:9px; background:var(--deep-water); color:var(--foam);
+  font-weight:700; font-size:14px; letter-spacing:0.01em; transition:background .15s ease, transform .1s ease;
+  margin-top:6px;
+}
+.btn-primary:hover{ background:var(--river); }
+.btn-primary:active{ transform:scale(0.985); }
+.btn-primary:disabled{ opacity:0.6; cursor:not-allowed; }
+
+.switch-line{ text-align:center; margin-top:20px; font-size:13.5px; color:var(--ink-soft); }
+.switch-line a{ color:var(--river); font-weight:600; text-decoration:none; cursor:pointer; }
+.switch-line a:hover{ text-decoration:underline; }
+
+.form-error{ font-size:13px; color:var(--red); margin-top:-6px; margin-bottom:14px; display:none; }
+.form-error.show{ display:block; }
+
+/* ================= APP SHELL (dashboards) ================= */
+.app-shell{ width:100%; min-height:100vh; flex-direction:column; }
+.topbar{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:16px 28px; background:var(--deep-water); color:var(--foam);
+}
+.topbar .brand{ display:flex; align-items:center; gap:9px; font-family:'Archivo',sans-serif; font-weight:800; font-size:18px; }
+.topbar .brand .dot{ width:9px; height:9px; border-radius:50%; background:var(--amber); }
+.topbar .right{ display:flex; align-items:center; gap:16px; }
+.role-pill{
+  font-family:'JetBrains Mono',monospace; font-size:11px; text-transform:uppercase; letter-spacing:0.08em;
+  background:rgba(255,255,255,0.12); padding:6px 12px; border-radius:20px;
+}
+.logout-btn{
+  background:transparent; color:var(--foam); border:1px solid rgba(255,255,255,0.3) !important; border-radius:8px;
+  padding:8px 14px; font-size:13px; font-weight:600;
+}
+.logout-btn:hover{ background:rgba(255,255,255,0.1); }
+
+.main{ flex:1; padding:32px 40px; max-width:1280px; margin:0 auto; width:100%; }
+.page-head{ margin-bottom:28px; }
+.page-head .kicker{ font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--river); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px; }
+.page-head h1{ font-size:28px; }
+
+/* ---------- USER DASHBOARD ---------- */
+.grid-2{ display:grid; grid-template-columns: 1.1fr 0.9fr; gap:28px; align-items:start; }
+.card{
+  background:#fff; border:1px solid var(--line); border-radius:16px; padding:26px; box-shadow:var(--shadow);
+}
+.card h3{ font-size:16px; margin-bottom:18px; display:flex; align-items:center; gap:8px; }
+.card h3 .num{ width:22px; height:22px; border-radius:50%; background:var(--deep-water); color:var(--foam); font-family:'JetBrains Mono',monospace; font-size:11px; display:flex; align-items:center; justify-content:center; }
+
+.upload-zone{
+  border:1.5px dashed var(--line); border-radius:12px; padding:28px; text-align:center; cursor:pointer;
+  transition:border-color .15s ease, background .15s ease; position:relative; overflow:hidden;
+}
+.upload-zone:hover{ border-color:var(--river-light); background:var(--mist); }
+.upload-zone input{ position:absolute; inset:0; opacity:0; cursor:pointer; }
+.upload-zone .icon{ font-size:26px; margin-bottom:8px; }
+.upload-zone .txt{ font-size:13.5px; color:var(--ink-soft); }
+.preview-strip{ display:flex; gap:10px; margin-top:14px; flex-wrap:wrap; }
+.preview-strip img{ width:70px; height:70px; object-fit:cover; border-radius:8px; border:1px solid var(--line); }
+
+.field textarea{
+  width:100%; padding:12px 14px; border:1.5px solid var(--line); border-radius:9px; font-size:14px; resize:vertical; min-height:100px;
+}
+.field textarea:focus{ outline:none; border-color:var(--river-light); box-shadow:0 0 0 3px rgba(46,147,181,0.15); }
+
+.loc-row{ display:flex; gap:10px; }
+.loc-row input{ flex:1; }
+.loc-btn{
+  padding:0 16px; border-radius:9px; background:var(--mist); color:var(--deep-water); font-weight:700; font-size:12.5px;
+  white-space:nowrap; border:1.5px solid var(--line) !important;
+}
+.loc-btn:hover{ background:var(--river-light); color:#fff; border-color:var(--river-light) !important; }
+.loc-status{ font-size:12px; color:var(--ink-soft); margin-top:6px; font-family:'JetBrains Mono',monospace; }
+
+.status-panel{ background:var(--mist); border-radius:12px; padding:16px; margin-top:18px; font-size:13px; color:var(--ink-soft); display:none; }
+.status-panel.show{ display:block; }
+.status-panel b{ color:var(--ink); }
+
+/* mini gauge used everywhere severity appears */
+.gauge-mini{ width:8px; height:34px; border-radius:4px; background:var(--gauge-track,#E4EDEE); position:relative; overflow:hidden; flex-shrink:0; }
+.gauge-mini i{ position:absolute; bottom:0; left:0; right:0; border-radius:4px; display:block; }
+
+.level-badge{
+  font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;
+  padding:5px 10px; border-radius:20px; display:inline-flex; align-items:center; gap:6px;
+}
+.level-badge::before{ content:""; width:7px; height:7px; border-radius:50%; }
+.lvl-critical{ background:rgba(193,67,45,0.12); color:var(--red); }
+.lvl-critical::before{ background:var(--red); }
+.lvl-high{ background:rgba(232,163,61,0.16); color:#B87418; }
+.lvl-high::before{ background:var(--amber); }
+.lvl-medium{ background:rgba(46,147,181,0.14); color:var(--river); }
+.lvl-medium::before{ background:var(--river-light); }
+.lvl-low{ background:rgba(62,143,111,0.13); color:var(--green); }
+.lvl-low::before{ background:var(--green); }
+.lvl-pending{ background:var(--mist); color:var(--ink-soft); }
+.lvl-pending::before{ background:#B7C7C9; }
+
+.my-reports{ margin-top:10px; display:flex; flex-direction:column; gap:12px; }
+.report-row{
+  display:flex; align-items:center; gap:12px; padding:12px; border:1px solid var(--line); border-radius:11px;
+}
+.report-row img{ width:44px; height:44px; border-radius:8px; object-fit:cover; background:var(--mist); }
+.report-row .rmeta{ flex:1; min-width:0; }
+.report-row .rmeta .desc{ font-size:13px; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.report-row .rmeta .time{ font-size:11px; color:var(--ink-soft); font-family:'JetBrains Mono',monospace; margin-top:2px; }
+.empty-note{ font-size:13px; color:var(--ink-soft); text-align:center; padding:20px 0; }
+
+/* ---------- ADMIN DASHBOARD ---------- */
+.stat-strip{ display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:26px; }
+.stat-card{ background:#fff; border:1px solid var(--line); border-radius:14px; padding:18px 20px; }
+.stat-card .lbl{ font-size:11.5px; text-transform:uppercase; letter-spacing:0.06em; color:var(--ink-soft); margin-bottom:8px; }
+.stat-card .val{ font-family:'JetBrains Mono',monospace; font-size:28px; font-weight:700; }
+.stat-card.c-critical .val{ color:var(--red); }
+.stat-card.c-high .val{ color:#B87418; }
+.stat-card.c-medium .val{ color:var(--river); }
+.stat-card.c-low .val{ color:var(--green); }
+
+.filter-row{ display:flex; gap:8px; margin-bottom:20px; flex-wrap:wrap; }
+.filter-chip{
+  padding:8px 15px; border-radius:20px; background:#fff; border:1.5px solid var(--line) !important; font-size:12.5px;
+  font-weight:600; color:var(--ink-soft);
+}
+.filter-chip.active{ background:var(--deep-water); color:#fff; border-color:var(--deep-water) !important; }
+
+.reports-list{ display:flex; flex-direction:column; gap:14px; }
+.report-card{
+  display:grid; grid-template-columns:44px 84px 1fr auto; gap:18px; align-items:center;
+  background:#fff; border:1px solid var(--line); border-radius:14px; padding:16px 18px;
+}
+.report-card .report-photo{ width:84px; height:84px; border-radius:10px; object-fit:cover; background:var(--mist); }
+.report-card .rc-body h4{ font-size:14.5px; margin-bottom:4px; }
+.report-card .rc-body .addr{ font-size:12.5px; color:var(--ink-soft); font-family:'JetBrains Mono',monospace; margin-bottom:6px; }
+.report-card .rc-body .desc{ font-size:13px; color:var(--ink); line-height:1.5; }
+.report-card .rc-side{ text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:8px; }
+.report-card .rc-side .time{ font-size:11px; color:var(--ink-soft); font-family:'JetBrains Mono',monospace; }
+
+/* ---------- toast ---------- */
+.toast{
+  position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px); opacity:0;
+  background:var(--ink); color:#fff; padding:13px 22px; border-radius:10px; font-size:13.5px; font-weight:600;
+  transition:all .25s ease; z-index:999; pointer-events:none;
+}
+.toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+@media (max-width: 900px){
+  .auth-wrap{ grid-template-columns:1fr; }
+  .auth-hero{ display:none; }
+  .grid-2{ grid-template-columns:1fr; }
+  .stat-strip{ grid-template-columns:repeat(2,1fr); }
+  .report-card{ grid-template-columns:44px 64px 1fr; grid-template-rows:auto auto; gap:12px 14px; }
+  .report-card .report-photo{ width:64px; height:64px; border-radius:8px; }
+  .report-card .rc-side{ align-items:flex-start; text-align:left; flex-direction:row; grid-column:1/-1; }
+}
+</style>
+</head>
+<body>
+
+<!-- ============ AUTH SCREEN ============ -->
+<div id="auth-screen" class="screen active">
+  <div class="auth-wrap">
+    <div class="auth-hero">
+      <div class="gauge-field" id="gaugeField"></div>
+      <div class="brand"><span class="dot"></span>FLOODLINE</div>
+      <div class="copy">
+        <div class="eyebrow">Flood reporting network</div>
+        <h1>Report what you see. Route rescue where it's needed most.</h1>
+        <p>Residents log water levels with a photo, a note, and a location. Every report is read and ranked by urgency automatically, so response teams see the worst-hit places first.</p>
+      </div>
+      <div class="stats">
+        <div class="stat"><b>&lt;60s</b><span>to file a report</span></div>
+        <div class="stat"><b>4</b><span>urgency tiers</span></div>
+        <div class="stat"><b>24/7</b><span>report intake</span></div>
+      </div>
+    </div>
+
+    <div class="auth-panel">
+      <div class="auth-card">
+
+        <!-- LOGIN FORM -->
+        <div id="login-form">
+          <div class="kicker">Welcome back</div>
+          <h2>Sign in</h2>
+          <div class="sub">Enter your details to reach your dashboard.</div>
+
+          <div class="field">
+            <label>Email</label>
+            <input type="email" id="login-email" placeholder="you@example.com">
+          </div>
+          <div class="field">
+            <label>Password</label>
+            <input type="password" id="login-password" placeholder="••••••••">
+          </div>
+          <div class="form-error" id="login-error"></div>
+          <button class="btn-primary" id="login-submit">Sign in</button>
+
+          <div class="switch-line">New here? <a id="go-register">Create an account</a></div>
+        </div>
+
+        <!-- REGISTER FORM -->
+        <div id="register-form" style="display:none;">
+          <div class="kicker">Get set up</div>
+          <h2>Create an account</h2>
+          <div class="sub">Register as a resident to file reports, or as a response team member to review them.</div>
+
+          <div class="role-toggle" id="register-role-toggle">
+            <button type="button" class="active" data-role="user">Resident</button>
+            <button type="button" data-role="admin">Response team</button>
+          </div>
+
+          <div class="field">
+            <label>Full name</label>
+            <input type="text" id="reg-name" placeholder="Jordan Rivers">
+          </div>
+          <div class="field">
+            <label>Email</label>
+            <input type="email" id="reg-email" placeholder="you@example.com">
+          </div>
+          <div class="field">
+            <label>Password</label>
+            <input type="password" id="reg-password" placeholder="••••••••">
+          </div>
+          <div class="field">
+            <label>Confirm password</label>
+            <input type="password" id="reg-confirm" placeholder="••••••••">
+          </div>
+          <div class="form-error" id="register-error"></div>
+          <button class="btn-primary" id="register-submit">Create account</button>
+
+          <div class="switch-line">Already registered? <a id="go-login">Sign in</a></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ USER DASHBOARD ============ -->
+<div id="user-screen" class="screen app-shell">
+  <div class="topbar">
+    <div class="brand"><span class="dot"></span>FLOODLINE</div>
+    <div class="right">
+      <span class="role-pill" id="user-name-pill">RESIDENT</span>
+      <button class="logout-btn" data-logout>Log out</button>
+    </div>
+  </div>
+  <div class="main">
+    <div class="page-head">
+      <div class="kicker">Resident dashboard</div>
+      <h1>File a flood report</h1>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <h3><span class="num">1</span>Add a photo</h3>
+        <div class="upload-zone" id="upload-zone">
+          <input type="file" id="image-input" accept="image/*">
+          <div class="icon">📷</div>
+          <div class="txt">Tap to upload a photo of the water, damage, or the area around you</div>
+        </div>
+        <div class="preview-strip" id="preview-strip"></div>
+
+        <div style="height:22px;"></div>
+        <h3><span class="num">2</span>Describe the situation</h3>
+        <div class="field">
+          <textarea id="desc-input" placeholder="What's happening? Note water depth, how fast it's rising, and anyone who needs help."></textarea>
+        </div>
+
+        <div style="height:6px;"></div>
+        <h3><span class="num">3</span>Confirm your location</h3>
+        <div class="loc-row">
+          <input type="text" id="address-input" placeholder="Street address or landmark">
+          <button class="loc-btn" id="use-location-btn">📍 Use my location</button>
+        </div>
+        <div class="loc-status" id="loc-status"></div>
+
+        <button class="btn-primary" id="submit-report-btn" style="margin-top:22px;">Send report</button>
+        <div class="status-panel" id="submit-status"></div>
+      </div>
+
+      <div class="card">
+        <h3><span class="num">✓</span>Your reports</h3>
+        <div class="my-reports" id="my-reports"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ ADMIN DASHBOARD ============ -->
+<div id="admin-screen" class="screen app-shell">
+  <div class="topbar">
+    <div class="brand"><span class="dot"></span>FLOODLINE</div>
+    <div class="right">
+      <span class="role-pill" id="admin-name-pill">RESPONSE TEAM</span>
+      <button class="logout-btn" data-logout>Log out</button>
+    </div>
+  </div>
+  <div class="main">
+    <div class="page-head">
+      <div class="kicker">Response dashboard</div>
+      <h1>Incoming reports, ranked by urgency</h1>
+    </div>
+
+    <div class="stat-strip">
+      <div class="stat-card c-critical"><div class="lbl">Critical</div><div class="val" id="count-critical">—</div></div>
+      <div class="stat-card c-high"><div class="lbl">High</div><div class="val" id="count-high">—</div></div>
+      <div class="stat-card c-medium"><div class="lbl">Medium</div><div class="val" id="count-medium">—</div></div>
+      <div class="stat-card c-low"><div class="lbl">Low</div><div class="val" id="count-low">—</div></div>
+    </div>
+
+    <div class="filter-row" id="filter-row">
+      <button class="filter-chip active" data-filter="all">All reports</button>
+      <button class="filter-chip" data-filter="PENDING">Pending</button>
+      <button class="filter-chip" data-filter="REVIEWED">Reviewed</button>
+      <button class="filter-chip" data-filter="RESOLVED">Resolved</button>
+    </div>
+
+    <div class="reports-list" id="reports-list"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* =========================================================================
+   FLOODLINE — backend-integrated frontend
+   All data operations go through the REST API. JWT is stored in
+   sessionStorage and automatically attached to every authenticated request.
+   ========================================================================= */
+
+// ── Configuration ──────────────────────────────────────────────────────────
+// Point this at the Express server. When served from the same origin this
+// can be empty ("") so all fetch calls use relative URLs.
+const API_BASE = "http://localhost:3000";
+
+// ── Session (in-memory; cleared on page reload / tab close) ────────────────
+// { token: string, user: { id, name, email, role } }
+let session = null;
+
+// Currently selected file for the report image upload
+let pendingFile = null;
+
+// Active filter on the admin reports panel (maps to backend REPORT_STATUS values)
+let adminFilter = "all";
+
+// ── JWT storage & retrieval ────────────────────────────────────────────────
+// sessionStorage keeps the token alive only for this browser tab, which is
+// the safest practical option for a SPA without a server-side session store.
+function saveSession(token, user) {
+  session = { token, user };
+  sessionStorage.setItem("fl_token", token);
+  sessionStorage.setItem("fl_user",  JSON.stringify(user));
+}
+function loadSession() {
+  const token = sessionStorage.getItem("fl_token");
+  const raw   = sessionStorage.getItem("fl_user");
+  if (token && raw) {
+    try { session = { token, user: JSON.parse(raw) }; } catch(_) { clearSession(); }
+  }
+}
+function clearSession() {
+  session = null;
+  sessionStorage.removeItem("fl_token");
+  sessionStorage.removeItem("fl_user");
+}
+
+// ── Authenticated fetch wrapper ────────────────────────────────────────────
+// Automatically attaches Authorization: Bearer <token> for every call.
+// Returns the parsed JSON body on success, or throws an Error whose
+// .message is the API "message" field (or a generic network error string).
+async function apiFetch(path, options = {}) {
+  const headers = { ...(options.headers || {}) };
+
+  // Attach JWT when we have a session
+  if (session && session.token) {
+    headers["Authorization"] = `Bearer ${session.token}`;
+  }
+
+  // Only set Content-Type for JSON bodies; let the browser set it for FormData
+  if (options.body && !(options.body instanceof FormData)) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  const json = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    const msg = json.message || `Request failed (${res.status})`;
+    const err = new Error(msg);
+    err.status = res.status;
+    throw err;
+  }
+
+  return json; // { success, message, data, timestamp }
+}
+
+// ── Utilities ──────────────────────────────────────────────────────────────
+function showToast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 2600);
+}
+function showScreen(id) {
+  document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+  document.getElementById(id).classList.add("active");
+}
+function fmtTime(d) {
+  return new Date(d).toLocaleString(undefined, { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" });
+}
+function escapeHtml(s) {
+  return (s || "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+// ── Severity → display level mapping ──────────────────────────────────────
+// The backend stores severity as UNKNOWN | LOW | MEDIUM | HIGH | CRITICAL
+// (uppercase). The CSS badge classes are lowercase (lvl-critical, etc.).
+function severityToLevel(severity) {
+  if (!severity || severity === "UNKNOWN") return null;
+  return severity.toLowerCase(); // "LOW" → "low", "CRITICAL" → "critical"
+}
+
+// Map backend REPORT_SEVERITY to gauge fill height
+function gaugeHeight(severity) {
+  return { CRITICAL:"100%", HIGH:"75%", MEDIUM:"50%", LOW:"25%" }[severity] || "10%";
+}
+function gaugeColor(severity) {
+  return { CRITICAL:"var(--red)", HIGH:"var(--amber)", MEDIUM:"var(--river-light)", LOW:"var(--green)" }[severity] || "#B7C7C9";
+}
+
+function levelBadge(severity, status) {
+  const level = severityToLevel(severity);
+  if (!level) return `<span class="level-badge lvl-pending">${escapeHtml(status) || "Pending"}</span>`;
+  const label = level.charAt(0).toUpperCase() + level.slice(1);
+  return `<span class="level-badge lvl-${level}">${label}</span>`;
+}
+
+// ── Image URL resolver ─────────────────────────────────────────────────────
+// imageUrl is stored as "/uploads/filename.jpg" on the backend.
+// We prefix API_BASE so the static file is fetched from the Express server.
+function resolveImageUrl(imageUrl) {
+  if (!imageUrl) return "";
+  return `${API_BASE}${imageUrl}`;
+}
+
+// ── Role-toggle handlers (register form only) ─────────────────────────────
+let selectedRegisterRole = "user";
+
+document.getElementById("register-role-toggle").addEventListener("click", e => {
+  const btn = e.target.closest("button"); if (!btn) return;
+  [...e.currentTarget.children].forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  selectedRegisterRole = btn.dataset.role;
+});
+
+// ── Switch between login / register ───────────────────────────────────────
+document.getElementById("go-register").addEventListener("click", () => {
+  document.getElementById("login-form").style.display = "none";
+  document.getElementById("register-form").style.display = "block";
+});
+document.getElementById("go-login").addEventListener("click", () => {
+  document.getElementById("register-form").style.display = "none";
+  document.getElementById("login-form").style.display = "block";
+});
+
+// ── Register ───────────────────────────────────────────────────────────────
+document.getElementById("register-submit").addEventListener("click", async () => {
+  const name    = document.getElementById("reg-name").value.trim();
+  const email   = document.getElementById("reg-email").value.trim();
+  const pw      = document.getElementById("reg-password").value;
+  const cpw     = document.getElementById("reg-confirm").value;
+  const errEl   = document.getElementById("register-error");
+  const btn     = document.getElementById("register-submit");
+
+  // Client-side guards
+  if (!name || !email || !pw || !cpw) {
+    errEl.textContent = "Fill in every field to continue.";
+    errEl.classList.add("show");
+    return;
+  }
+  if (pw !== cpw) {
+    errEl.textContent = "Passwords don't match.";
+    errEl.classList.add("show");
+    return;
+  }
+  if (pw.length < 8) {
+    errEl.textContent = "Password must be at least 8 characters.";
+    errEl.classList.add("show");
+    return;
+  }
+
+  errEl.classList.remove("show");
+  btn.disabled = true;
+  btn.textContent = "Creating account…";
+
+  try {
+    await apiFetch("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ name, email, password: pw, role: selectedRegisterRole }),
+    });
+
+    showToast("Account created — sign in to continue");
+    document.getElementById("register-form").style.display = "none";
+    document.getElementById("login-form").style.display = "block";
+    document.getElementById("login-email").value = email;
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.classList.add("show");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Create account";
+  }
+});
+
+// ── Login ──────────────────────────────────────────────────────────────────
+document.getElementById("login-submit").addEventListener("click", async () => {
+  const email  = document.getElementById("login-email").value.trim();
+  const pw     = document.getElementById("login-password").value;
+  const errEl  = document.getElementById("login-error");
+  const btn    = document.getElementById("login-submit");
+
+  if (!email || !pw) {
+    errEl.textContent = "Enter your email and password.";
+    errEl.classList.add("show");
+    return;
+  }
+
+  errEl.classList.remove("show");
+  btn.disabled = true;
+  btn.textContent = "Signing in…";
+
+  try {
+    // POST /api/auth/login — response.data = { token, user: { id, name, email, role } }
+    const json = await apiFetch("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password: pw }),
+    });
+
+    saveSession(json.data.token, json.data.user);
+    enterApp();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.classList.add("show");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Sign in";
+  }
+});
+
+// ── Logout ─────────────────────────────────────────────────────────────────
+document.querySelectorAll("[data-logout]").forEach(b => {
+  b.addEventListener("click", () => {
+    clearSession();
+    pendingFile = null;
+    renderPreviewStrip();
+    document.getElementById("login-email").value = "";
+    document.getElementById("login-password").value = "";
+    document.getElementById("desc-input").value = "";
+    document.getElementById("address-input").value = "";
+    document.getElementById("loc-status").textContent = "";
+    document.getElementById("submit-status").classList.remove("show");
+    showScreen("auth-screen");
+  });
+});
+
+// ── Enter app after successful login ──────────────────────────────────────
+function enterApp() {
+  const { name, role } = session.user;
+  if (role === "admin") {
+    document.getElementById("admin-name-pill").textContent = name.toUpperCase();
+    showScreen("admin-screen");
+    loadAdminDashboard();
+    loadAdminReports();
+  } else {
+    document.getElementById("user-name-pill").textContent = name.toUpperCase();
+    showScreen("user-screen");
+    loadMyReports();
+  }
+}
+
+// ── Image upload (single file) ────────────────────────────────────────────
+document.getElementById("image-input").addEventListener("change", e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  pendingFile = file;
+
+  // Preview the selected image using a local object URL
+  const url = URL.createObjectURL(file);
+  const strip = document.getElementById("preview-strip");
+  strip.innerHTML = `<img src="${url}" alt="preview">`;
+});
+
+function renderPreviewStrip() {
+  document.getElementById("preview-strip").innerHTML = "";
+}
+
+// ── Geolocation ───────────────────────────────────────────────────────────
+document.getElementById("use-location-btn").addEventListener("click", () => {
+  const status = document.getElementById("loc-status");
+  if (!navigator.geolocation) {
+    status.textContent = "Location is not available on this device.";
+    return;
+  }
+  status.textContent = "Locating…";
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      const { latitude, longitude } = pos.coords;
+      const addrEl = document.getElementById("address-input");
+      addrEl.dataset.lat = latitude;
+      addrEl.dataset.lon = longitude;
+      addrEl.value = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+      status.textContent = `Location captured (±${Math.round(pos.coords.accuracy)}m accuracy)`;
+    },
+    () => { status.textContent = "Could not get your location — enter your address manually."; },
+    { enableHighAccuracy: true, timeout: 8000 }
+  );
+});
+
+// ── Submit report ─────────────────────────────────────────────────────────
+// Sends a multipart/form-data POST to /api/reports.
+// Fields: description, address, latitude (opt), longitude (opt), image (opt file).
+document.getElementById("submit-report-btn").addEventListener("click", async () => {
+  const description = document.getElementById("desc-input").value.trim();
+  const addrEl      = document.getElementById("address-input");
+  const address     = addrEl.value.trim();
+  const panel       = document.getElementById("submit-status");
+  const btn         = document.getElementById("submit-report-btn");
+
+  if (!description || !address) {
+    panel.classList.add("show");
+    panel.innerHTML = `<b>Missing details.</b> Add a description and a location before sending.`;
+    return;
+  }
+  if (description.length < 10) {
+    panel.classList.add("show");
+    panel.innerHTML = `<b>Description too short.</b> Please provide at least 10 characters.`;
+    return;
+  }
+
+  panel.classList.add("show");
+  panel.innerHTML = `<b>Sending to the response team…</b> Your report is being submitted.`;
+  btn.disabled = true;
+  btn.textContent = "Sending…";
+
+  try {
+    const form = new FormData();
+    form.append("description", description);
+    form.append("address", address);
+    if (addrEl.dataset.lat) form.append("latitude",  addrEl.dataset.lat);
+    if (addrEl.dataset.lon) form.append("longitude", addrEl.dataset.lon);
+    if (pendingFile)        form.append("image", pendingFile);
+
+    await apiFetch("/api/reports", { method: "POST", body: form });
+
+    // Reset composer
+    pendingFile = null;
+    renderPreviewStrip();
+    document.getElementById("image-input").value = "";
+    document.getElementById("desc-input").value = "";
+    addrEl.value = "";
+    delete addrEl.dataset.lat;
+    delete addrEl.dataset.lon;
+    document.getElementById("loc-status").textContent = "";
+
+    panel.innerHTML = `<b>Report submitted.</b> The response team has been notified and will review it shortly.`;
+    showToast("Report submitted successfully");
+    loadMyReports();
+  } catch (err) {
+    panel.innerHTML = `<b>Submission failed.</b> ${escapeHtml(err.message)}`;
+    showToast("Could not submit report");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Send report";
+  }
+});
+
+// ── Load user's own reports ───────────────────────────────────────────────
+// GET /api/reports — returns reports belonging to the authenticated user
+async function loadMyReports() {
+  const list = document.getElementById("my-reports");
+  list.innerHTML = `<div class="empty-note">Loading your reports…</div>`;
+
+  try {
+    const json = await apiFetch("/api/reports");
+    const reports = json.data.reports || [];
+
+    if (reports.length === 0) {
+      list.innerHTML = `<div class="empty-note">Reports you send will show up here with their status.</div>`;
+      return;
+    }
+
+    list.innerHTML = reports.map(r => {
+      const imgHtml = r.imageUrl
+        ? `<img src="${escapeHtml(resolveImageUrl(r.imageUrl))}" alt="report photo">`
+        : `<div style="width:44px;height:44px;border-radius:8px;background:var(--mist);"></div>`;
+
+      return `
+        <div class="report-row">
+          ${imgHtml}
+          <div class="rmeta">
+            <div class="desc">${escapeHtml(r.description)}</div>
+            <div class="time">${fmtTime(r.createdAt)} · ${escapeHtml(r.address)}</div>
+          </div>
+          ${levelBadge(r.severity, r.status)}
+        </div>`;
+    }).join("");
+  } catch (err) {
+    list.innerHTML = `<div class="empty-note">Could not load reports: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// ── Admin: load dashboard stat counts ────────────────────────────────────
+// GET /api/admin/dashboard → data.predictionsByRisk: { LOW, MEDIUM, HIGH }
+// The admin dashboard uses prediction risk levels as the urgency counters.
+async function loadAdminDashboard() {
+  try {
+    const json = await apiFetch("/api/admin/dashboard");
+    const risk = json.data.predictionsByRisk || {};
+    document.getElementById("count-critical").textContent = risk.HIGH    ?? 0;
+    document.getElementById("count-high").textContent     = risk.MEDIUM  ?? 0;
+    document.getElementById("count-medium").textContent   = risk.LOW     ?? 0;
+    document.getElementById("count-low").textContent      = json.data.totalReports ?? 0;
+  } catch (err) {
+    // Non-fatal: counts stay at "—" if the dashboard call fails
+    console.error("Dashboard load failed:", err.message);
+  }
+}
+
+// ── Admin: load and render all reports ───────────────────────────────────
+// GET /api/admin/reports?status=<STATUS>
+// Reports are sorted by severity (CRITICAL first) then by date.
+const SEVERITY_RANK = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, UNKNOWN: 4 };
+
+async function loadAdminReports() {
+  const list = document.getElementById("reports-list");
+  list.innerHTML = `<div class="empty-note">Loading reports…</div>`;
+
+  try {
+    const qs   = adminFilter !== "all" ? `?status=${adminFilter}` : "";
+    const json = await apiFetch(`/api/admin/reports${qs}`);
+    const reports = (json.data.reports || []).slice().sort((a, b) => {
+      const ra = SEVERITY_RANK[a.severity] ?? 4;
+      const rb = SEVERITY_RANK[b.severity] ?? 4;
+      if (ra !== rb) return ra - rb;
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+
+    if (reports.length === 0) {
+      list.innerHTML = `<div class="empty-note">No reports found. As residents send reports, they'll appear here ranked by urgency.</div>`;
+      return;
+    }
+
+    list.innerHTML = reports.map(r => {
+      const lat = r.latitude  ? Number(r.latitude).toFixed(4)  : null;
+      const lon = r.longitude ? Number(r.longitude).toFixed(4) : null;
+      const coordStr = (lat && lon) ? `${lat}, ${lon}` : "manual address";
+      const reporterName = r.user ? escapeHtml(r.user.name || r.user.email) : "unknown";
+      const imgSrc = r.imageUrl ? escapeHtml(resolveImageUrl(r.imageUrl)) : "";
+      const imgHtml = imgSrc
+        ? `<img src="${imgSrc}" class="report-photo" alt="report photo">`
+        : `<div class="report-photo photo-placeholder"></div>`;
+
+      return `
+        <div class="report-card">
+          <div class="gauge-mini"><i style="height:${gaugeHeight(r.severity)}; background:${gaugeColor(r.severity)};"></i></div>
+          ${imgHtml}
+          <div class="rc-body">
+            <h4>${escapeHtml(r.address)}</h4>
+            <div class="addr">${escapeHtml(coordStr)} · reported by ${reporterName}</div>
+            <div class="desc">${escapeHtml(r.description)}</div>
+          </div>
+          <div class="rc-side">
+            ${levelBadge(r.severity, r.status)}
+            <div class="time">${fmtTime(r.createdAt)}</div>
+          </div>
+        </div>`;
+    }).join("");
+  } catch (err) {
+    list.innerHTML = `<div class="empty-note">Could not load reports: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// ── Admin filter chips ────────────────────────────────────────────────────
+// Filter values now map directly to backend REPORT_STATUS values.
+document.getElementById("filter-row").addEventListener("click", e => {
+  const btn = e.target.closest("button"); if (!btn) return;
+  [...e.currentTarget.children].forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  adminFilter = btn.dataset.filter;
+  loadAdminReports();
+});
+
+// ── Decorative rising gauges on the login hero ────────────────────────────
+(function buildGaugeField() {
+  const field = document.getElementById("gaugeField");
+  const n = 14;
+  for (let i = 0; i < n; i++) {
+    const bar = document.createElement("div");
+    bar.className = "gauge-bar";
+    const w = 100 / n;
+    bar.style.left  = (i * w) + "%";
+    bar.style.width = (w * 0.55) + "%";
+    const h = 30 + Math.random() * 55;
+    bar.style.height = h + "%";
+    bar.style.animationDelay    = (Math.random() * 4) + "s";
+    bar.style.animationDuration = (5 + Math.random() * 3) + "s";
+    field.appendChild(bar);
+  }
+})();
+
+// ── Restore session on page load ──────────────────────────────────────────
+// If the user already has a valid token in sessionStorage, skip the login
+// screen and take them straight to their dashboard.
+(function init() {
+  loadSession();
+  if (session) {
+    enterApp();
+  }
+})();
+</script>
+</body>
+</html>

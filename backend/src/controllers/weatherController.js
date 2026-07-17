@@ -1,35 +1,37 @@
-const axios = require("axios");
+/**
+ * Weather Controller.
+ * Receives HTTP requests and delegates to weatherService.
+ * Returns standardized API responses.
+ */
 
-const getWeather = async (req, res) => {
+const weatherService = require("../services/weatherService");
+const response       = require("../utils/responseFormatter");
+
+/**
+ * GET /api/weather?lat=&lon=
+ * Fetches current weather + flood risk for given coordinates.
+ */
+const getWeather = async (req, res, next) => {
     try {
-        const latitude = 21.1702; // Surat
-        const longitude = 72.8311;
-
-        const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,rain`;
-
-        const response = await axios.get(url);
-
-       const current = response.data.current;
-
-res.json({
-    success: true,
-    data: {
-        location: "Surat",
-        temperature: current.temperature_2m,
-        humidity: current.relative_humidity_2m,
-        windSpeed: current.wind_speed_10m,
-        rainfall: current.rain,
-        updatedAt: current.time
-    }
-});
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: "Unable to fetch weather"
-        });
+        const { lat, lon } = req.query;
+        const weather      = await weatherService.getWeather(lat, lon);
+        return response.success(res, "Weather data retrieved successfully.", weather);
+    } catch (err) {
+        next(err);
     }
 };
 
-module.exports = {
-    getWeather
+/**
+ * GET /api/weather/history?page=&limit=&locationId=
+ * Returns stored weather history, newest first.
+ */
+const getHistory = async (req, res, next) => {
+    try {
+        const result = await weatherService.getHistory(req.query);
+        return response.success(res, "Weather history retrieved successfully.", result);
+    } catch (err) {
+        next(err);
+    }
 };
+
+module.exports = { getWeather, getHistory };
