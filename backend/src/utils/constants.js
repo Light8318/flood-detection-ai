@@ -9,10 +9,10 @@ const ROLES = Object.freeze({
 });
 
 const REPORT_STATUS = Object.freeze({
-    PENDING:   "PENDING",
-    REVIEWED:  "REVIEWED",
-    RESOLVED:  "RESOLVED",
-    DISMISSED: "DISMISSED",
+    PENDING:      "PENDING",
+    UNDER_REVIEW: "UNDER_REVIEW",
+    IN_PROGRESS:  "IN_PROGRESS",
+    RESOLVED:     "RESOLVED",
 });
 
 const REPORT_SEVERITY = Object.freeze({

@@ -17,45 +17,24 @@
 
 const fs     = require("fs");
 const path   = require("path");
-const axios  = require("axios");
 const env    = require("../config/env");
 const logger = require("../config/logger");
+const { GoogleGenAI } = require("@google/genai");
 const { FLOOD_SEVERITY, RESCUE_PRIORITY } = require("../utils/constants");
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
-
-/**
- * Builds the Gemini REST endpoint URL for the configured model.
- * @returns {string}
- */
-const geminiUrl = () =>
-    `${GEMINI_BASE}/${env.GEMINI_MODEL}:generateContent?key=${env.GEMINI_API_KEY}`;
-
-/**
- * Posts a request to the Gemini API and returns the raw text from the
- * first candidate. Throws on HTTP or network errors.
- *
- * @param {object[]} parts  — Gemini content parts array
- * @returns {Promise<string>}
- */
-const callGemini = async (parts) => {
-    const body = {
-        contents: [{ parts }],
-        generationConfig: {
-            temperature:     0.2,
-            maxOutputTokens: 1024,
-        },
-    };
-
-    const response = await axios.post(geminiUrl(), body, {
-        headers: { "Content-Type": "application/json" },
-        timeout: 20000,
-    });
-
-    return response.data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-};
+// Initialize Google Gemini SDK
+let ai = null;
+if (env.GEMINI_API_KEY) {
+    try {
+        ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
+        logger.info("Gemini API Key Loaded");
+        console.log("Gemini API Key Loaded");
+    } catch (err) {
+        logger.error("Failed to initialize Google Generative AI SDK", { message: err.message });
+    }
+} else {
+    logger.warn("GEMINI_API_KEY not set — Gemini SDK not initialized.");
+}
 
 /**
  * Attempts to extract the first JSON object from a raw Gemini text response.
@@ -96,7 +75,7 @@ const extractJson = (rawText) => {
  * }>}
  */
 const analyzeFloodRisk = async (context) => {
-    if (!env.GEMINI_API_KEY) {
+    if (!ai) {
         logger.warn("GEMINI_API_KEY not set — skipping weather AI analysis.");
         return { aiAnalysis: null, recommendation: null };
     }
@@ -127,7 +106,18 @@ Respond ONLY with a valid JSON object — no markdown, no extra text:
 `.trim();
 
     try {
-        const rawText = await callGemini([{ text: prompt }]);
+        logger.info("Sending request to Gemini");
+        console.log("Sending request to Gemini");
+        
+        const response = await ai.models.generateContent({
+            model: "gemini-3.5-flash",
+            contents: prompt,
+        });
+        const rawText = response.text || "";
+
+        logger.info("Gemini response received");
+        console.log("Gemini response received");
+
         const parsed  = extractJson(rawText);
 
         if (!parsed) {
@@ -140,7 +130,8 @@ Respond ONLY with a valid JSON object — no markdown, no extra text:
             recommendation: parsed.recommendation || null,
         };
     } catch (err) {
-        logger.error("Gemini weather analysis failed.", { message: err.message });
+        logger.error("Gemini API Error", { message: err.message });
+        console.error("Gemini API Error:", err.message);
         return { aiAnalysis: null, recommendation: null };
     }
 };
@@ -179,20 +170,16 @@ const analyzeFloodImage = async (imagePath, weatherContext) => {
         rescuePriority: null,
     };
 
-    if (!env.GEMINI_API_KEY) {
+    if (!ai) {
         logger.warn("GEMINI_API_KEY not set — skipping image AI analysis.");
         return NULL_RESULT;
     }
 
-    // Read and base64-encode the image
-    let imageBase64;
     let mimeType;
     try {
-        const buffer   = fs.readFileSync(imagePath);
-        imageBase64    = buffer.toString("base64");
-        const ext      = path.extname(imagePath).toLowerCase().replace(".", "");
-        const mimeMap  = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp" };
-        mimeType       = mimeMap[ext] || "image/jpeg";
+        const ext = path.extname(imagePath).toLowerCase().replace(".", "");
+        const mimeMap = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp" };
+        mimeType = mimeMap[ext] || "image/jpeg";
     } catch (err) {
         logger.error("Failed to read image for Gemini analysis.", { imagePath, message: err.message });
         return NULL_RESULT;
@@ -227,15 +214,24 @@ Rules:
 `.trim();
 
     try {
-        const rawText = await callGemini([
-            { text: prompt },
-            {
-                inlineData: {
-                    mimeType,
-                    data: imageBase64,
-                },
-            },
-        ]);
+        const imagePart = {
+            inlineData: {
+                data: fs.readFileSync(imagePath).toString("base64"),
+                mimeType
+            }
+        };
+
+        logger.info("Sending request to Gemini");
+        console.log("Sending request to Gemini");
+
+        const response = await ai.models.generateContent({
+            model: "gemini-3.5-flash",
+            contents: [prompt, imagePart]
+        });
+        const rawText = response.text || "";
+
+        logger.info("Gemini response received");
+        console.log("Gemini response received");
 
         const parsed = extractJson(rawText);
 
@@ -244,8 +240,6 @@ Rules:
             return { ...NULL_RESULT, imageAnalysis: rawText.trim() || null };
         }
 
-        // Validate and sanitise enum fields — fall back to null if Gemini
-        // returns a value outside the allowed set
         const floodSeverity  = Object.values(FLOOD_SEVERITY).includes(parsed.floodSeverity)
             ? parsed.floodSeverity
             : null;
@@ -265,7 +259,8 @@ Rules:
             rescuePriority,
         };
     } catch (err) {
-        logger.error("Gemini image analysis failed.", { message: err.message });
+        logger.error("Gemini API Error", { message: err.message });
+        console.error("Gemini API Error:", err.message);
         return NULL_RESULT;
     }
 };

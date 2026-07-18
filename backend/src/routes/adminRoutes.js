@@ -56,6 +56,11 @@ router.patch(
     validate(validateUpdateReportStatus),
     adminController.updateReportStatus
 );
+router.patch(
+    "/reports/:id/respond",
+    apiLimiter,
+    adminController.respondToReport
+);
 router.delete("/reports/:id", apiLimiter, adminController.deleteReport);
 
 // ── Predictions ───────────────────────────────────────────────────────────────

@@ -8,25 +8,41 @@ const prisma = require("../config/prisma");
 const createReport = async (data) => {
     return prisma.report.create({
         data,
-        include: { user: { select: { id: true, name: true, email: true } } },
+        include: {
+            user: { select: { id: true, name: true, email: true } },
+            predictions: true
+        },
     });
 };
 
-const findAllReports = async ({ skip, take, status, userId }) => {
+const findAllReports = async ({ skip, take, status, userId, sortByPriority = false }) => {
     const where = {};
     if (status)  where.status = status;
     if (userId)  where.userId = userId;
 
-    const [reports, total] = await Promise.all([
-        prisma.report.findMany({
-            where,
-            skip,
-            take,
-            orderBy: { createdAt: "desc" },
-            include: { user: { select: { id: true, name: true, email: true } } },
-        }),
-        prisma.report.count({ where }),
-    ]);
+    let reports = await prisma.report.findMany({
+        where,
+        include: {
+            user: { select: { id: true, name: true, email: true } },
+            predictions: true
+        },
+        orderBy: { createdAt: "desc" }
+    });
+
+    if (sortByPriority) {
+        const SEVERITY_RANK = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, UNKNOWN: 4 };
+        reports.sort((a, b) => {
+            const ra = SEVERITY_RANK[a.severity] ?? 4;
+            const rb = SEVERITY_RANK[b.severity] ?? 4;
+            if (ra !== rb) return ra - rb;
+            return new Date(b.createdAt) - new Date(a.createdAt);
+        });
+    }
+
+    const total = reports.length;
+    if (skip !== undefined && take !== undefined) {
+        reports = reports.slice(skip, skip + take);
+    }
 
     return { reports, total };
 };
@@ -34,7 +50,10 @@ const findAllReports = async ({ skip, take, status, userId }) => {
 const findReportById = async (id) => {
     return prisma.report.findUnique({
         where: { id },
-        include: { user: { select: { id: true, name: true, email: true } } },
+        include: {
+            user: { select: { id: true, name: true, email: true } },
+            predictions: true
+        },
     });
 };
 
@@ -42,7 +61,10 @@ const updateReport = async (id, data) => {
     return prisma.report.update({
         where: { id },
         data,
-        include: { user: { select: { id: true, name: true, email: true } } },
+        include: {
+            user: { select: { id: true, name: true, email: true } },
+            predictions: true
+        },
     });
 };
 
@@ -57,6 +79,13 @@ const countReportsByStatus = async () => {
     });
 };
 
+const countReportsBySeverity = async () => {
+    return prisma.report.groupBy({
+        by:      ["severity"],
+        _count:  { id: true },
+    });
+};
+
 module.exports = {
     createReport,
     findAllReports,
@@ -64,4 +93,5 @@ module.exports = {
     updateReport,
     deleteReport,
     countReportsByStatus,
+    countReportsBySeverity,
 };

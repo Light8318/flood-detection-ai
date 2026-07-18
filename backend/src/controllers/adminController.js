@@ -6,11 +6,7 @@
  */
 
 const userRepository    = require("../repositories/userRepository");
-const {
-    createAdminAction,
-    findAllAdminActions,
-    getDashboardCounts,
-} = require("../repositories/adminRepository");
+const adminRepository   = require("../repositories/adminRepository");
 const reportService     = require("../services/reportService");
 const {
     findAllPredictions,
@@ -18,6 +14,7 @@ const {
 } = require("../repositories/predictionRepository");
 const {
     countReportsByStatus,
+    countReportsBySeverity,
     findReportById,
 } = require("../repositories/reportRepository");
 const { ADMIN_ACTIONS } = require("../utils/constants");
@@ -35,26 +32,35 @@ const getDashboard = async (req, res, next) => {
         const [
             { totalUsers, totalReports, totalPredictions },
             reportsByStatus,
-            predictionsByRisk,
+            reportsBySeverity,
         ] = await Promise.all([
-            getDashboardCounts(),
+            adminRepository.getDashboardCounts(),
             countReportsByStatus(),
-            countPredictionsByRiskLevel(),
+            countReportsBySeverity(),
         ]);
 
         const reportStats     = Object.fromEntries(
             reportsByStatus.map((r) => [r.status, r._count.id])
         );
-        const predictionStats = Object.fromEntries(
-            predictionsByRisk.map((r) => [r.riskLevel, r._count.id])
+        const severityStats   = Object.fromEntries(
+            reportsBySeverity.map((r) => [r.severity, r._count.id])
         );
+
+        // Ensure all severity categories contribute exactly one count or default to 0
+        const categories = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+        for (const cat of categories) {
+            if (!(cat in severityStats)) {
+                severityStats[cat] = 0;
+            }
+        }
 
         return response.success(res, "Dashboard data retrieved.", {
             totalUsers,
             totalReports,
             totalPredictions,
             reportsByStatus:   reportStats,
-            predictionsByRisk: predictionStats,
+            predictionsByRisk: severityStats,
+            reportsBySeverity: severityStats,
         });
     } catch (err) {
         next(err);
@@ -280,6 +286,36 @@ const listAuditLog = async (req, res, next) => {
     }
 };
 
+/**
+ * PATCH /api/admin/reports/:id/respond
+ * Saves administrative reply to report. Writes an audit log entry.
+ */
+const respondToReport = async (req, res, next) => {
+    try {
+        const reportId = parseInt(req.params.id, 10);
+        
+        if (!req.body.adminResponse || req.body.adminResponse.trim().length === 0) {
+            return response.error(res, "Admin response is required.", 400);
+        }
+
+        const adminName = req.user.name || req.user.email || "Admin";
+
+        const report = await reportService.respondToReport(reportId, req.body, adminName);
+
+        await adminRepository.createAdminAction({
+            action:     ADMIN_ACTIONS.UPDATE_REPORT_STATUS,
+            targetType: "Report",
+            targetId:   reportId,
+            adminId:    req.user.id,
+            notes:      `Responded: "${req.body.adminResponse}"`,
+        });
+
+        return response.success(res, "Admin response saved successfully.", report);
+    } catch (err) {
+        next(err);
+    }
+};
+
 module.exports = {
     getDashboard,
     listUsers,
@@ -289,6 +325,7 @@ module.exports = {
     listReports,
     getReport,
     updateReportStatus,
+    respondToReport,
     deleteReport,
     listPredictions,
     listAuditLog,
