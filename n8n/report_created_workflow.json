@@ -1,0 +1,150 @@
+{
+  "name": "Report Created Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "report-created",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "1d8bf670-65d1-4475-b6d3-9bc04cb5b4be",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "for (const item of $input.all()) {\n  if (!item.json.email) {\n    throw new Error('Missing required field: email');\n  }\n  if (!item.json.subject) {\n    throw new Error('Missing required field: subject');\n  }\n  if (!item.json.html) {\n    throw new Error('Missing required field: html');\n  }\n  if (!item.json.pdfUrl) {\n    throw new Error('Missing required field: pdfUrl');\n  }\n}\nreturn $input.all();"
+      },
+      "id": "e44d32a0-4cf8-48b2-b1fa-710e2060195e",
+      "name": "Code Node",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.pdfUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "id": "2d7b42aa-fb33-41bb-b5de-872f23cf80bb",
+      "name": "Download PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.resend.com/emails",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.RESEND_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"from\": \"FloodLine Alerts <onboarding@resend.dev>\", \"to\": [\"{{ $('Code Node').item.json.email }}\"], \"subject\": \"{{ $('Code Node').item.json.subject }}\", \"html\": \"{{ $('Code Node').item.json.html }}\", \"attachments\": [{\"filename\": \"IncidentReport_{{ $('Code Node').item.json.reportId }}.pdf\", \"content\": \"{{ $binary.data.data }}\", \"mimeType\": \"application/pdf\", \"contentType\": \"application/pdf\"}]}",
+        "options": {}
+      },
+      "id": "f516bc92-563b-4859-994c-1d5be7fa8331",
+      "name": "Send Email (Resend)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"success\": true,\n  \"message\": \"Automation completed successfully\"\n}",
+        "options": {}
+      },
+      "id": "0695123d-ff9f-4318-912a-89bc3a055d7f",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        900,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Code Node",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code Node": {
+      "main": [
+        [
+          {
+            "node": "Download PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download PDF": {
+      "main": [
+        [
+          {
+            "node": "Send Email (Resend)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email (Resend)": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "versionId": "bc1ffea4-4824-4f11-9a7f-7a4c7e6c382b",
+  "meta": {
+    "instanceId": "e2c349e5d4cb05c8fe228c2ff64c519d"
+  }
+}

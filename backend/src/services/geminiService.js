@@ -77,7 +77,7 @@ const extractJson = (rawText) => {
 const analyzeFloodRisk = async (context) => {
     if (!ai) {
         logger.warn("GEMINI_API_KEY not set — skipping weather AI analysis.");
-        return { aiAnalysis: null, recommendation: null };
+        return { aiAnalysis: null, recommendation: null, error: "GEMINI_API_KEY not set" };
     }
 
     const prompt = `
@@ -132,7 +132,7 @@ Respond ONLY with a valid JSON object — no markdown, no extra text:
     } catch (err) {
         logger.error("Gemini API Error", { message: err.message });
         console.error("Gemini API Error:", err.message);
-        return { aiAnalysis: null, recommendation: null };
+        return { aiAnalysis: null, recommendation: null, error: err.message };
     }
 };
 
@@ -172,7 +172,7 @@ const analyzeFloodImage = async (imagePath, weatherContext) => {
 
     if (!ai) {
         logger.warn("GEMINI_API_KEY not set — skipping image AI analysis.");
-        return NULL_RESULT;
+        return { ...NULL_RESULT, error: "GEMINI_API_KEY not set" };
     }
 
     let mimeType;
@@ -261,8 +261,119 @@ Rules:
     } catch (err) {
         logger.error("Gemini API Error", { message: err.message });
         console.error("Gemini API Error:", err.message);
-        return NULL_RESULT;
+        return { ...NULL_RESULT, error: err.message };
     }
 };
 
-module.exports = { analyzeFloodRisk, analyzeFloodImage };
+/**
+ * Generates email content, incident summary, and safety instructions via Gemini AI.
+ * Falls back to a predefined template if Gemini is unavailable or returns bad content.
+ *
+ * @param {object} param0
+ * @param {object} param0.report
+ * @param {string} param0.aiAnalysis
+ * @param {string} param0.weatherRisk
+ * @param {string} param0.rescuePriority
+ * @returns {Promise<{
+ *   subject: string,
+ *   html: string,
+ *   summary: string,
+ *   safetyInstructions: string
+ * }>}
+ */
+const generateEmergencyCommunication = async ({ report, aiAnalysis, weatherRisk, rescuePriority }) => {
+    if (!ai) {
+        logger.warn("GEMINI_API_KEY not set — using fallback emergency communication.");
+        return getFallbackCommunication({ report, aiAnalysis, weatherRisk, rescuePriority });
+    }
+
+    const reporterName = report.user?.name || report.reporter || "Citizen";
+    const reporterEmail = report.user?.email || report.email || "";
+
+    const prompt = `
+You are an emergency response officer.
+The flood has already been analyzed.
+Do NOT analyze the flood again.
+Use the supplied report information:
+- Incident ID: ${report.id}
+- Reporter: ${reporterName}
+- Email: ${reporterEmail}
+- Phone: ${report.phone || "N/A"}
+- Location: ${report.address || report.location || "N/A"}
+- Latitude: ${report.latitude || "N/A"}
+- Longitude: ${report.longitude || "N/A"}
+- Description: ${report.description}
+- Severity: ${report.severity || "N/A"}
+- Weather Risk: ${weatherRisk || "N/A"}
+- Rescue Priority: ${rescuePriority || "N/A"}
+- AI Analysis: ${aiAnalysis || "N/A"}
+- Status: ${report.status || "N/A"}
+- Created At: ${report.createdAt}
+
+Generate:
+1. Professional Email Subject
+2. HTML Email Body (use professional, modern styling in inline CSS for the recipient citizen, including their name)
+3. Executive Incident Summary (concise summary for emergency services)
+4. Citizen Safety Instructions (step-by-step instructions for the citizen based on severity: ${report.severity})
+
+Return ONLY valid JSON in the following format:
+{
+  "subject": "<subject>",
+  "html": "<html>",
+  "summary": "<summary>",
+  "safetyInstructions": "<safetyInstructions>"
+}
+Return JSON only.
+`.trim();
+
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-3.5-flash",
+            contents: prompt,
+        });
+        const rawText = response.text || "";
+        const parsed = extractJson(rawText);
+
+        if (!parsed || !parsed.subject || !parsed.html) {
+            logger.warn("Gemini communication generation: invalid format, using fallback.", { rawText });
+            return getFallbackCommunication({ report, aiAnalysis, weatherRisk, rescuePriority });
+        }
+
+        return {
+            subject: parsed.subject,
+            html: parsed.html,
+            summary: parsed.summary || "",
+            safetyInstructions: parsed.safetyInstructions || "",
+        };
+    } catch (err) {
+        logger.error("Gemini communication generation failed: " + err.message);
+        return getFallbackCommunication({ report, aiAnalysis, weatherRisk, rescuePriority });
+    }
+};
+
+const getFallbackCommunication = ({ report, aiAnalysis, weatherRisk, rescuePriority }) => {
+    const severity = report.severity || "UNKNOWN";
+    const reporterName = report.user?.name || report.reporter || "Citizen";
+    const address = report.address || report.location || "N/A";
+    return {
+        subject: `Flood Report #${report.id} Registered - FloodLine Notification`,
+        html: `
+            <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+                <h2 style="color: #1a365d;">FloodLine Notification</h2>
+                <p>Hello ${reporterName},</p>
+                <p>Your flood report has been successfully submitted and saved in our system.</p>
+                <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                    <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Incident ID</td><td style="padding: 8px; border: 1px solid #ddd;">${report.id}</td></tr>
+                    <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Location</td><td style="padding: 8px; border: 1px solid #ddd;">${address}</td></tr>
+                    <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Assessed Severity</td><td style="padding: 8px; border: 1px solid #ddd; color: #c53030; font-weight: bold;">${severity}</td></tr>
+                </table>
+                <p>Our emergency response team has been alerted and will coordinate rescue/relief actions as necessary.</p>
+                <p>Best regards,<br>FloodLine Emergency Response Team</p>
+            </div>
+        `.trim(),
+        summary: `Flood report #${report.id} successfully registered. System severity is ${severity}. Fallback email communication active.`,
+        safetyInstructions: "Stay indoors, avoid low-lying roads and waterlogged zones, and keep emergency contact numbers ready."
+    };
+};
+
+module.exports = { analyzeFloodRisk, analyzeFloodImage, generateEmergencyCommunication };

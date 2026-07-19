@@ -32,6 +32,7 @@ const env = {
     GEMINI_MODEL:      process.env.GEMINI_MODEL      || "gemini-1.5-flash",
 
     N8N_WEBHOOK_URL:   process.env.N8N_WEBHOOK_URL   || null,
+    RESEND_API_KEY:    process.env.RESEND_API_KEY    || null,
 
     // Resolve to an absolute path so Multer works regardless of cwd
     UPLOAD_DIR:        process.env.UPLOAD_DIR

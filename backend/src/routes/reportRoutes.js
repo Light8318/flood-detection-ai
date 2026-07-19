@@ -31,6 +31,7 @@ router.post(
 );
 
 router.get("/",       authenticate, apiLimiter, reportController.listReports);
+router.get("/:id/pdf", reportController.getReportPDF);
 router.get("/:id",    authenticate, apiLimiter, reportController.getReport);
 
 router.patch(

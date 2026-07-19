@@ -71,4 +71,30 @@ const removeReport = async (req, res, next) => {
     }
 };
 
-module.exports = { submitReport, listReports, getReport, updateReportStatus, removeReport };
+const getReportPDF = async (req, res, next) => {
+    try {
+        const reportId = parseInt(req.params.id, 10);
+        const reportData = await reportService.getReportDataForPDF(reportId);
+        if (!reportData) {
+            return res.status(404).json({
+                success: false,
+                message: "Report not found."
+            });
+        }
+
+        const { generateIncidentReportPDF } = require("../services/pdfService");
+        const pdfBuffer = await generateIncidentReportPDF(reportData);
+
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename=IncidentReport_${reportId}.pdf`);
+        
+        const logger = require("../config/logger");
+        logger.info("PDF downloaded");
+        
+        return res.send(pdfBuffer);
+    } catch (err) {
+        next(err);
+    }
+};
+
+module.exports = { submitReport, listReports, getReport, updateReportStatus, removeReport, getReportPDF };

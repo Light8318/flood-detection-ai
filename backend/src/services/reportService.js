@@ -16,9 +16,9 @@ const {
 const { parsePagination, paginationMeta, stripUndefined } = require("../utils/helper");
 const { getWeather } = require("./weatherService");
 const { calculateFloodRisk } = require("../utils/floodRiskCalculator");
-const { analyzeFloodRisk, analyzeFloodImage } = require("./geminiService");
+const { analyzeFloodRisk, analyzeFloodImage, generateEmergencyCommunication } = require("./geminiService");
 const { createPrediction } = require("../repositories/predictionRepository");
-const { triggerFloodAlert } = require("./n8nService");
+const { triggerFloodAlert, triggerReportCreated } = require("./n8nService");
 const logger = require("../config/logger");
 const { ALERT_EVENTS } = require("../utils/constants");
 
@@ -93,13 +93,28 @@ const submitReport = async (body, user, file) => {
     console.log("Gemini analysis completed");
 
     // 5. Combine weather analysis and image analysis
-    // 6. Determine emergency level (LOW, MEDIUM, HIGH, CRITICAL)
+    // 6. Determine emergency level (LOW, MEDIUM, HIGH, CRITICAL, or UNAVAILABLE)
     let emergencyLevel = "LOW";
+    let aiFailed = false;
+    let aiReason = "";
+
+    if (weatherAI.error || imageAI.error) {
+        aiFailed = true;
+        const errMsg = weatherAI.error || imageAI.error;
+        const isQuota = errMsg.includes("429") || 
+                        errMsg.toLowerCase().includes("quota") || 
+                        errMsg.toLowerCase().includes("limit") ||
+                        errMsg.toLowerCase().includes("exhausted");
+        aiReason = isQuota ? "Gemini quota exceeded" : `Gemini API Error: ${errMsg}`;
+    }
+
     const isCritical = (imageAI.rescuePriority === "CRITICAL" || imageAI.floodSeverity === "EXTREME");
     const isHigh = (risk.level === "HIGH" || imageAI.rescuePriority === "HIGH" || imageAI.floodSeverity === "SEVERE");
     const isMedium = (risk.level === "MEDIUM" || imageAI.rescuePriority === "MEDIUM" || imageAI.floodSeverity === "MODERATE");
 
-    if (isCritical) {
+    if (aiFailed) {
+        emergencyLevel = "UNAVAILABLE";
+    } else if (isCritical) {
         emergencyLevel = "CRITICAL";
     } else if (isHigh) {
         emergencyLevel = "HIGH";
@@ -112,13 +127,111 @@ const submitReport = async (body, user, file) => {
     // 7. Save the prediction in the database and update report severity
     const updatedReport = await updateReport(report.id, { severity: emergencyLevel });
 
+    // Call generateEmergencyCommunication first
+    let communication = null;
+    if (!aiFailed) {
+        try {
+            communication = await generateEmergencyCommunication({
+                report: {
+                    id:          report.id,
+                    description: report.description,
+                    address:     report.address,
+                    latitude:    report.latitude,
+                    longitude:   report.longitude,
+                    severity:    emergencyLevel,
+                    status:      report.status,
+                    createdAt:   report.createdAt,
+                    phone:       body.phone || user.phone || null
+                },
+                aiAnalysis:     weatherAI.aiAnalysis,
+                weatherRisk:    risk.level,
+                rescuePriority: imageAI.rescuePriority
+            });
+            logger.info("AI communication generated");
+        } catch (err) {
+            logger.error("Failed to generate AI communication", err);
+        }
+    }
+
+    const aiSummary = aiFailed
+        ? `AI Severity: UNAVAILABLE\nReason: ${aiReason}`
+        : (communication ? communication.summary : (weatherAI.aiAnalysis || "N/A"));
+
+    const safetyInstructions = aiFailed
+        ? "Stay indoors, avoid low-lying roads and waterlogged zones, and keep emergency contact numbers ready."
+        : (communication ? communication.safetyInstructions : (weatherAI.recommendation || "N/A"));
+
+    const emailSubject = aiFailed
+        ? "Flood Report Acknowledgement"
+        : (communication ? communication.subject : "Flood Report Acknowledgement");
+
+    const emailHtml = aiFailed
+        ? `<p>Your flood report has been successfully registered. However, the AI analysis is currently unavailable: ${aiReason}</p>`
+        : (communication ? communication.html : "<p>Report received.</p>");
+
+    // Generate PDF report using pdf-lib
+    let pdfBuffer = null;
+    let pdfGenerated = false;
+    try {
+        const { generateIncidentReportPDF } = require("./pdfService");
+        pdfBuffer = await generateIncidentReportPDF({
+            id: updatedReport.id,
+            reporter: user.name,
+            email: user.email,
+            phone: body.phone || user.phone || "N/A",
+            location: updatedReport.address,
+            latitude: updatedReport.latitude,
+            longitude: updatedReport.longitude,
+            description: updatedReport.description,
+            severity: updatedReport.severity,
+            weatherRisk: risk.level,
+            rescuePriority: imageAI.rescuePriority || "N/A",
+            aiAnalysis: aiFailed ? `AI Severity: UNAVAILABLE\nReason: ${aiReason}` : (imageAI.imageAnalysis || weatherAI.aiAnalysis || "N/A"),
+            executiveSummary: aiSummary,
+            safetyInstructions: safetyInstructions,
+            status: updatedReport.status,
+            createdAt: updatedReport.createdAt
+        });
+        pdfGenerated = true;
+    } catch (err) {
+        logger.error("Failed to generate PDF report", err);
+    }
+
+    // Send email using Resend SDK is commented out to let n8n handle all downstream email delivery
+    let emailSent = false;
+    /*
+    try {
+        const { sendEmergencyEmail } = require("./emailService");
+        emailSent = await sendEmergencyEmail({
+            to: user.email,
+            subject: emailSubject,
+            html: emailHtml,
+            pdfBuffer: pdfBuffer
+        });
+    } catch (err) {
+        logger.error("Failed to send email via Resend SDK", err);
+    }
+    */
+
+    // Save prediction in database
     const predictionData = {
         riskLevel:      risk.level,
         riskScore:      risk.score,
-        reasons:        risk.reasons,
-        aiAnalysis:     weatherAI.aiAnalysis,
-        recommendation: weatherAI.recommendation,
-        imageAnalysis:  imageAI.imageAnalysis,
+        reasons:        aiFailed ? {
+            factors:            risk.reasons,
+            aiStatus:           "FAILED",
+            aiReason:           aiReason,
+            severity:           null
+        } : {
+            factors:            risk.reasons,
+            subject:            emailSubject,
+            html:               emailHtml,
+            summary:            aiSummary,
+            safetyInstructions: safetyInstructions
+        },
+        aiAnalysis:     aiSummary,
+        recommendation: safetyInstructions,
+        imageAnalysis:  aiFailed ? `AI Severity: UNAVAILABLE\nReason: ${aiReason}` : imageAI.imageAnalysis,
         floodSeverity:  imageAI.floodSeverity,
         confidence:     imageAI.confidence,
         rescuePriority: imageAI.rescuePriority,
@@ -139,62 +252,29 @@ const submitReport = async (body, user, file) => {
     logger.info("Prediction stored");
     console.log("Prediction stored");
 
-    // 8. If severity is HIGH or CRITICAL, trigger the n8n webhook
-    if (emergencyLevel === "HIGH" || emergencyLevel === "CRITICAL") {
-        const eventName = emergencyLevel === "CRITICAL"
-            ? ALERT_EVENTS.FLOOD_CRITICAL_RESCUE
-            : ALERT_EVENTS.FLOOD_HIGH_RISK;
-
-        const payload = {
-            event: eventName,
-            user: {
-                id:    user.id,
-                name:  user.name,
-                email: user.email,
-                role:  user.role,
-            },
-            location: {
-                name:      prediction.locationName,
-                latitude:  prediction.latitude,
-                longitude: prediction.longitude,
-                state:     weatherPayload.state || null,
-                country:   weatherPayload.country || null,
-            },
-            weather: {
-                temperature: prediction.temperature,
-                humidity:    prediction.humidity,
-                rainfall:    prediction.rainfall,
-                windSpeed:   prediction.windSpeed,
-                pressure:    prediction.pressure,
-            },
-            prediction: {
-                id:             prediction.id,
-                riskLevel:      prediction.riskLevel,
-                riskScore:      prediction.riskScore,
-                reasons:        prediction.reasons,
-                aiAnalysis:     prediction.aiAnalysis     ?? null,
-                recommendation: prediction.recommendation ?? null,
-                imageAnalysis:  prediction.imageAnalysis  ?? null,
-                floodSeverity:  prediction.floodSeverity  ?? null,
-                confidence:     prediction.confidence     ?? null,
-                rescuePriority: prediction.rescuePriority ?? null,
-                reportId:       prediction.reportId       ?? null,
-            },
-            timestamp: prediction.createdAt instanceof Date
-                ? prediction.createdAt.toISOString()
-                : new Date().toISOString(),
-        };
-
-        // Fire-and-forget webhook trigger
-        triggerFloodAlert(payload).catch((err) => {
-            logger.error("n8n webhook dispatch failed", { message: err.message });
+    // Trigger n8n after all previous steps succeed (we consider report creation pipeline success)
+    try {
+        await triggerReportCreated({
+            reportId: updatedReport.id,
+            incidentId: updatedReport.id,
+            reporterName: user.name,
+            email: user.email,
+            phone: body.phone || user.phone || "N/A",
+            location: updatedReport.address,
+            latitude: updatedReport.latitude,
+            longitude: updatedReport.longitude,
+            severity: updatedReport.severity,
+            weatherRisk: risk.level,
+            description: updatedReport.description,
+            aiSummary: aiSummary,
+            subject: emailSubject,
+            html: emailHtml,
+            pdfUrl: `http://localhost:3000/api/reports/${updatedReport.id}/pdf`
         });
-
-        logger.info("n8n triggered");
-        console.log("n8n triggered");
+    } catch (err) {
+        logger.error("Failed to trigger n8n webhook", err);
     }
 
-    // 9. Return the report together with prediction data
     return {
         ...updatedReport,
         prediction,
@@ -313,6 +393,39 @@ const respondToReport = async (id, data, adminName) => {
     });
 };
 
+const getReportDataForPDF = async (id) => {
+    const report = await getReport(id, null, true);
+    if (!report) return null;
+    
+    const prediction = report.predictions && report.predictions.length > 0 ? report.predictions[0] : {};
+    
+    let summary = prediction.aiAnalysis;
+    let safety = prediction.recommendation;
+    if (prediction.reasons && typeof prediction.reasons === "object" && !Array.isArray(prediction.reasons)) {
+        if (prediction.reasons.summary) summary = prediction.reasons.summary;
+        if (prediction.reasons.safetyInstructions) safety = prediction.reasons.safetyInstructions;
+    }
+    
+    return {
+        id: report.id,
+        reporter: report.user ? report.user.name : "N/A",
+        email: report.user ? report.user.email : "N/A",
+        phone: "N/A",
+        location: report.address,
+        latitude: report.latitude,
+        longitude: report.longitude,
+        description: report.description,
+        severity: report.severity,
+        weatherRisk: prediction.riskLevel || "N/A",
+        rescuePriority: prediction.rescuePriority || "N/A",
+        aiAnalysis: prediction.imageAnalysis || prediction.aiAnalysis || "N/A",
+        executiveSummary: summary || "N/A",
+        safetyInstructions: safety || "N/A",
+        status: report.status,
+        createdAt: report.createdAt
+    };
+};
+
 module.exports = {
     submitReport,
     listReports,
@@ -320,4 +433,5 @@ module.exports = {
     updateReportStatus,
     respondToReport,
     removeReport,
+    getReportDataForPDF
 };

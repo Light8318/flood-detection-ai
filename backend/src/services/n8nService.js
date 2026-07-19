@@ -12,12 +12,12 @@
  *    prediction pipeline is never blocked by a delivery failure.
  */
 
-const axios  = require("axios");
-const env    = require("../config/env");
+const axios = require("axios");
+const env = require("../config/env");
 const logger = require("../config/logger");
 
-const MAX_ATTEMPTS   = 2;
-const TIMEOUT_MS     = 10000;
+const MAX_ATTEMPTS = 2;
+const TIMEOUT_MS = 10000;
 const RETRY_DELAY_MS = 2000;
 
 /**
@@ -54,7 +54,7 @@ const triggerFloodAlert = async (payload) => {
             });
 
             logger.info("n8n flood alert delivered.", {
-                event:      payload.event,
+                event: payload.event,
                 statusCode: response.status,
                 attempt,
             });
@@ -63,21 +63,21 @@ const triggerFloodAlert = async (payload) => {
 
         } catch (err) {
             const statusCode = err.response?.status ?? null;
-            const retryable  = isRetryable(err);
+            const retryable = isRetryable(err);
 
             logger.warn(`n8n flood alert attempt ${attempt} failed.`, {
-                event:      payload.event,
+                event: payload.event,
                 statusCode,
-                message:    err.message,
-                willRetry:  retryable && attempt < MAX_ATTEMPTS,
+                message: err.message,
+                willRetry: retryable && attempt < MAX_ATTEMPTS,
             });
 
             // Do not retry on 4xx — those are configuration errors
             if (!retryable || attempt === MAX_ATTEMPTS) {
                 logger.error("n8n flood alert permanently failed — giving up.", {
-                    event:      payload.event,
+                    event: payload.event,
                     statusCode,
-                    message:    err.message,
+                    message: err.message,
                 });
                 return;
             }
@@ -88,4 +88,35 @@ const triggerFloodAlert = async (payload) => {
     }
 };
 
-module.exports = { triggerFloodAlert };
+const triggerReportCreated = async (report) => {
+    if (!env.N8N_WEBHOOK_URL) {
+        logger.warn("N8N_WEBHOOK_URL is not configured — report created webhook not triggered.");
+        return null;
+    }
+
+    try {
+        logger.info("Triggering n8n webhook...");
+
+        // ADD THESE TWO LINES
+        logger.info(`Webhook URL: ${env.N8N_WEBHOOK_URL}`);
+        logger.info("Payload being sent:", report);
+
+        const response = await axios.post(env.N8N_WEBHOOK_URL, report, {
+            headers: { "Content-Type": "application/json" },
+        });
+
+        logger.info("Webhook triggered");
+        logger.info("Workflow completed");
+        return response;
+
+    } catch (err) {
+        logger.error("Failed to trigger n8n", {
+            message: err.message,
+            status: err.response?.status,
+            data: err.response?.data,
+        });
+        return null;
+    }
+};
+
+module.exports = { triggerFloodAlert, triggerReportCreated };
