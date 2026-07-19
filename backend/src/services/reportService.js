@@ -125,11 +125,24 @@ const submitReport = async (body, user, file) => {
     }
 
     // 7. Save the prediction in the database and update report severity
-    const updatedReport = await updateReport(report.id, { severity: emergencyLevel });
+    logger.info("[DEBUG] Attempting to update report severity in DB via updateReport...");
+    console.log("[DEBUG] Attempting to update report severity in DB via updateReport...");
+    let updatedReport;
+    try {
+        updatedReport = await updateReport(report.id, { severity: emergencyLevel });
+        logger.info("[DEBUG] Report severity updated successfully", { id: updatedReport.id, severity: updatedReport.severity });
+        console.log("[DEBUG] Report severity updated successfully. ID:", updatedReport.id, "Severity:", updatedReport.severity);
+    } catch (err) {
+        logger.error("[DEBUG] Failed to update report severity", { message: err.message, stack: err.stack });
+        console.error("[DEBUG] Failed to update report severity:", err);
+        throw err;
+    }
 
     // Call generateEmergencyCommunication first
     let communication = null;
     if (!aiFailed) {
+        logger.info("[DEBUG] Attempting to generate emergency communication via Gemini...");
+        console.log("[DEBUG] Attempting to generate emergency communication via Gemini...");
         try {
             communication = await generateEmergencyCommunication({
                 report: {
@@ -147,9 +160,12 @@ const submitReport = async (body, user, file) => {
                 weatherRisk:    risk.level,
                 rescuePriority: imageAI.rescuePriority
             });
-            logger.info("AI communication generated");
+            logger.info("[DEBUG] Emergency communication generated successfully");
+            console.log("[DEBUG] Emergency communication generated successfully");
         } catch (err) {
-            logger.error("Failed to generate AI communication", err);
+            logger.error("[DEBUG] Failed to generate emergency communication", { message: err.message, stack: err.stack });
+            console.error("[DEBUG] Failed to generate emergency communication:", err);
+            // Do not throw to allow PDF generation to proceed
         }
     }
 
@@ -172,6 +188,8 @@ const submitReport = async (body, user, file) => {
     // Generate PDF report using pdf-lib
     let pdfBuffer = null;
     let pdfGenerated = false;
+    logger.info("[DEBUG] Attempting to generate PDF report via pdf-lib...");
+    console.log("[DEBUG] Attempting to generate PDF report via pdf-lib...");
     try {
         const { generateIncidentReportPDF } = require("./pdfService");
         pdfBuffer = await generateIncidentReportPDF({
@@ -193,8 +211,11 @@ const submitReport = async (body, user, file) => {
             createdAt: updatedReport.createdAt
         });
         pdfGenerated = true;
+        logger.info("[DEBUG] PDF report generated successfully", { size: pdfBuffer ? pdfBuffer.length : 0 });
+        console.log("[DEBUG] PDF report generated successfully. Size:", pdfBuffer ? pdfBuffer.length : 0);
     } catch (err) {
-        logger.error("Failed to generate PDF report", err);
+        logger.error("[DEBUG] Failed to generate PDF report", { message: err.message, stack: err.stack });
+        console.error("[DEBUG] Failed to generate PDF report:", err);
     }
 
     // Send email using Resend SDK is commented out to let n8n handle all downstream email delivery
@@ -247,12 +268,22 @@ const submitReport = async (body, user, file) => {
         reportId:       report.id,
     };
 
-    const prediction = await createPrediction(predictionData);
-
-    logger.info("Prediction stored");
-    console.log("Prediction stored");
+    logger.info("[DEBUG] Attempting to save prediction in DB via createPrediction...");
+    console.log("[DEBUG] Attempting to save prediction in DB via createPrediction...");
+    let prediction;
+    try {
+        prediction = await createPrediction(predictionData);
+        logger.info("Prediction stored", { id: prediction.id });
+        console.log("Prediction stored. ID:", prediction.id);
+    } catch (err) {
+        logger.error("[DEBUG] Failed to save prediction in DB", { message: err.message, stack: err.stack });
+        console.error("[DEBUG] Failed to save prediction in DB:", err);
+        throw err;
+    }
 
     // Trigger n8n after all previous steps succeed (we consider report creation pipeline success)
+    logger.info("[DEBUG] Attempting to trigger n8n webhook via triggerReportCreated...");
+    console.log("[DEBUG] Attempting to trigger n8n webhook via triggerReportCreated...");
     try {
         await triggerReportCreated({
             reportId: updatedReport.id,
@@ -269,10 +300,13 @@ const submitReport = async (body, user, file) => {
             aiSummary: aiSummary,
             subject: emailSubject,
             html: emailHtml,
-            pdfUrl: `http://localhost:3000/api/reports/${updatedReport.id}/pdf`
+            pdfUrl: `https://flood-detection-ai.onrender.com/api/reports/${updatedReport.id}/pdf`
         });
+        logger.info("[DEBUG] triggerReportCreated successfully executed");
+        console.log("[DEBUG] triggerReportCreated successfully executed");
     } catch (err) {
         logger.error("Failed to trigger n8n webhook", err);
+        console.error("Failed to trigger n8n webhook:", err);
     }
 
     return {

@@ -18,6 +18,16 @@ const logger = require("./config/logger");
 const env = require("./config/env");
 
 // Route modules
+// Register global error listeners to prevent silent failures and log uncaught exceptions/rejections
+process.on("uncaughtException", (err) => {
+    logger.error("UNCAUGHT EXCEPTION: " + err.message, { stack: err.stack });
+    console.error(`[${new Date().toISOString()}] [CRITICAL] UNCAUGHT EXCEPTION:`, err);
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+    logger.error("UNHANDLED REJECTION", { reason: String(reason) });
+    console.error(`[${new Date().toISOString()}] [CRITICAL] UNHANDLED REJECTION at:`, promise, "reason:", reason);
+});
 const healthRoute = require("./routes/health");
 const authRoutes = require("./routes/authRoutes");
 const weatherRoutes = require("./routes/weatherRoutes");
